@@ -1,4 +1,4 @@
-# AzResourceGroupKit
+# Azure resource group PowerShell module
 
 A small PowerShell module that standardizes how resource groups get created in
 Azure: a fixed naming convention, a mandatory delete lock, and a monthly cost
@@ -122,7 +122,7 @@ Each step function (`New-StandardResourceGroup`, `Set-ResourceGroupDeleteLock`,
   (`00000000-0000-0000-0000-000000000000`, `team@example.com`). No real
   tenant, subscription, or credential is referenced anywhere.
 
-## Testing status
+## Validation level
 
 **This module has never been run against a real Azure subscription.** Every
 test mocks the underlying `Az.Resources` / `Invoke-AzRestMethod` calls with

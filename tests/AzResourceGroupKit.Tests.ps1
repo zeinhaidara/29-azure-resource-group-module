@@ -57,6 +57,28 @@ Describe 'New-StandardResourceGroup' {
         Should -Invoke New-AzResourceGroup -ModuleName AzResourceGroupKit -Times 0
     }
 
+    # Az.Resources writes a non-terminating error with this message (plus a
+    # timestamp prefix) when a named group is missing.
+    It 'treats the not-found error as absent and creates the group' {
+        Mock Get-AzResourceGroup -ModuleName AzResourceGroupKit {
+            Write-Error '[12:00:00] - Provided resource group does not exist.'
+        }
+
+        New-StandardResourceGroup -Name 'prod-billing-eastus-rg' -Location eastus
+        Should -Invoke New-AzResourceGroup -ModuleName AzResourceGroupKit -Times 1
+    }
+
+    It 'rethrows a permission error and never creates or updates the group' {
+        Mock Get-AzResourceGroup -ModuleName AzResourceGroupKit {
+            Write-Error "AuthorizationFailed: The client 'dev@example.com' does not have authorization to perform action 'Microsoft.Resources/subscriptions/resourcegroups/read'."
+        }
+
+        { New-StandardResourceGroup -Name 'prod-billing-eastus-rg' -Location eastus } |
+            Should -Throw '*AuthorizationFailed*'
+        Should -Invoke New-AzResourceGroup -ModuleName AzResourceGroupKit -Times 0
+        Should -Invoke Set-AzResourceGroup -ModuleName AzResourceGroupKit -Times 0
+    }
+
     It 'is idempotent: merges tags instead of recreating when the group already exists in the same location' {
         Mock Get-AzResourceGroup -ModuleName AzResourceGroupKit {
             [pscustomobject]@{ ResourceGroupName = 'prod-billing-eastus-rg'; Location = 'eastus'; Tags = @{ owner = 'platform' } }
@@ -116,6 +138,17 @@ Describe 'Set-ResourceGroupDeleteLock' {
         Mock New-AzResourceLock -ModuleName AzResourceGroupKit { throw 'should not be called' }
 
         Set-ResourceGroupDeleteLock -ResourceGroupName 'prod-billing-eastus-rg' -WhatIf
+        Should -Invoke New-AzResourceLock -ModuleName AzResourceGroupKit -Times 0
+    }
+
+    It 'throws on a lookup permission error before any lock is created' {
+        Mock Get-AzResourceLock -ModuleName AzResourceGroupKit {
+            Write-Error "AuthorizationFailed: The client 'dev@example.com' does not have authorization to perform action 'Microsoft.Authorization/locks/read'."
+        }
+        Mock New-AzResourceLock -ModuleName AzResourceGroupKit { throw 'should not be called' }
+
+        { Set-ResourceGroupDeleteLock -ResourceGroupName 'prod-billing-eastus-rg' } |
+            Should -Throw '*AuthorizationFailed*'
         Should -Invoke New-AzResourceLock -ModuleName AzResourceGroupKit -Times 0
     }
 }

@@ -19,7 +19,9 @@ function Set-ResourceGroupDeleteLock {
         [string]$LockName = 'standard-delete-lock'
     )
 
-    $existingLock = Get-AzResourceLock -ResourceGroupName $ResourceGroupName -ErrorAction SilentlyContinue |
+    # No locks is an empty list, not an error, so nothing needs suppressing.
+    # Any lookup error stops here, before a new lock is considered.
+    $existingLock = Get-AzResourceLock -ResourceGroupName $ResourceGroupName -ErrorAction Stop |
         Where-Object { $_.Name -eq $LockName }
 
     if ($existingLock) {

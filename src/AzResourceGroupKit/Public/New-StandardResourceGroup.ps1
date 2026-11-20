@@ -26,7 +26,19 @@ function New-StandardResourceGroup {
         throw "Resource group name '$Name' does not satisfy the naming convention."
     }
 
-    $existing = Get-AzResourceGroup -Name $Name -ErrorAction SilentlyContinue
+    # Get-AzResourceGroup reports a missing group as an error, not as $null.
+    # Only that error means "absent"; anything else (auth, network, throttling) stops here.
+    try {
+        $existing = Get-AzResourceGroup -Name $Name -ErrorAction Stop
+    }
+    catch {
+        if ($_.Exception.Message -like '*Provided resource group does not exist*') {
+            $existing = $null
+        }
+        else {
+            throw
+        }
+    }
 
     if ($existing) {
         if ($existing.Location -ne $Location) {

@@ -107,6 +107,39 @@ Each step function (`New-StandardResourceGroup`, `Set-ResourceGroupDeleteLock`,
 - **Budget**: the current budget is read first; if the amount and the full
   set of alert thresholds already match, no `PUT` is issued.
 
+## Lookup errors
+
+Both lookups fail loudly instead of guessing:
+
+- **Resource group:** `Get-AzResourceGroup -Name` runs with
+  `-ErrorAction Stop` inside `try`/`catch`. Only the not-found error counts
+  as "absent" and leads to `New-AzResourceGroup`; any other error (sign-in,
+  network, throttling, a permission error that surfaces differently) is
+  rethrown, and nothing is created or updated.
+- **Lock:** `Get-AzResourceLock` runs with `-ErrorAction Stop`. A group with
+  no locks returns an empty list, which needs no error suppression, so any
+  error from the lookup is a real failure and stops the function before
+  `New-AzResourceLock` is considered.
+
+**What "not found" looks like, and what this relies on.** The Az.Resources
+docs page for `Get-AzResourceGroup` (azps-17.0.0) doesn't say how a missing
+group is reported. The module's source in `Azure/azure-powershell` does: the
+get-by-name path catches the REST client's `CloudException` and writes a
+non-terminating error with the message **"Provided resource group does not
+exist."** (resource `ResourceGroupDoesntExists`), prefixed with a timestamp.
+That is the same in the `v11.6.0-April2024` release (Az.Resources 6.16.x,
+next to the 6.16.1 pinned in CI) and on `main`, and Az's own scenario tests
+match it as `*Provided resource group does not exist.`. This module matches
+`*Provided resource group does not exist*`.
+
+Caveat from the same source: the cmdlet maps **any** `CloudException` from
+that get call to the same message, so a permission error on reading that
+specific group can be reported as "does not exist". In that case the module
+goes on to `New-AzResourceGroup`, which fails with its own authorization
+error, so it still fails loudly, just one step later. Errors that aren't
+`CloudException` (not signed in, network, token problems) are rethrown at
+the lookup.
+
 ## Security notes
 
 - No credentials are stored or required to run the tests — every Az cmdlet
@@ -114,6 +147,7 @@ Each step function (`New-StandardResourceGroup`, `Set-ResourceGroupDeleteLock`,
   requires a normal `Connect-AzAccount` session with the Az PowerShell
   modules, same as any other Az script.
 - The least-privilege Azure RBAC actions needed to run this for real:
+  `Microsoft.Resources/subscriptions/resourceGroups/read` (the lookup),
   `Microsoft.Resources/subscriptions/resourceGroups/write`,
   `Microsoft.Authorization/locks/write`, `Microsoft.Authorization/locks/read`,
   and `Microsoft.Consumption/budgets/write` (and `/read`) scoped to the
@@ -131,9 +165,15 @@ has ever been exercised. That means:
 
 - Tested: naming-convention generation and validation (including negative
   cases), idempotency and conflict handling for the resource group, lock,
-  and budget steps, `-WhatIf` making zero mocked calls at every level, and
-  input validation (invalid environment, invalid threshold range).
-- Not tested: actual Azure API behavior, auth/permission errors, API
+  and budget steps, `-WhatIf` making zero mocked calls at every level, input
+  validation (invalid environment, invalid threshold range), and lookup
+  errors with mocked Az cmdlets: a not-found error still creates the group,
+  while a permission error from either lookup makes the function throw and
+  `New-AzResourceGroup` / `New-AzResourceLock` are never called.
+- Not tested: actual Azure API behavior, and whether real permission errors
+  look like the mocked ones (the mocks use the not-found message read from
+  the Az source and an `AuthorizationFailed` message; see "Lookup errors" for
+  how a real 403 on the group can be reported as not-found), API
   throttling, the real shape of `Invoke-AzRestMethod` responses beyond what
   this module's tests assume, and any Az module version skew.
 - Linted with PSScriptAnalyzer (1.22.0); 0 findings.
